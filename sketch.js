@@ -19,15 +19,12 @@ function preload() {
   image_A_element = document.getElementById('image_A_element_id');
   image_A_element.setAttribute('crossOrigin', 'Anonymous');
   image_A_element.setAttribute('src', 'images/box.png');
-  //image_A_element.classList.add('hide');
+  image_A_element.classList.add('hide');
 
   image_B_element = document.getElementById('image_B_element_id');
   image_B_element.setAttribute('crossOrigin', 'Anonymous');
   image_B_element.setAttribute('src', 'images/box_in_scene.png');
-  //image_B_element.classList.add('hide');
-  
-  //must be a beter way to do this...
-  //setTimeout(setupWhenImageLoaded,100);
+  image_B_element.classList.add('hide');
 }
 
 function setup() {
@@ -40,10 +37,6 @@ function setup() {
   button.mousePressed(buttonClick);
   // ensure texture UVs use normalized coordinates
   textureMode(NORMAL);
-}
-
-function setupWhenImageLoaded() {
-  //Align_img();
 }
 
 function buttonClick() {
@@ -179,15 +172,6 @@ function Align_img() {
   let knnDistance_option = 0.7;  //document.getElementById('knn_distance').value;
   let pyrDown_option = "No";  //document.getElementById('pyrDown').value;
 
-//   //If the users is going to try a second attempt we need to clear out the canvases
-//   let image_blank_element = document.getElementById('image_blank');
-//   let im_blank = cv.imread(image_blank_element);
-//   cv.imshow('keypoints1', im_blank);
-//   cv.imshow('keypoints2', im_blank);
-//   cv.imshow('imageCompareMatches', im_blank);
-//   cv.imshow('image_Aligned', im_blank);
-//   cv.imshow('inlierMatches', im_blank);
-
   console.error("STEP 1: READ IN IMAGES **********************************************************************");
   //im2 is the original reference image we are trying to align to
   let im2 = cv.imread('image_A_element_id');
@@ -259,17 +243,6 @@ function Align_img() {
   console.log("descriptors2: ", descriptors2);
   getMatStats(descriptors1, "descriptors1");
   getMatStats(descriptors2, "descriptors2");
-
-//   //draw all the keypoints on each image and display it to the user
-//   let keypoints1_img = new cv.Mat();
-//   let keypoints2_img = new cv.Mat();
-//   let keypointcolor = new cv.Scalar(0,255,0, 255);
-//   //this flag does not work because of bug https://github.com/opencv/opencv/issues/13641?_pjax=%23js-repo-pjax-container
-//   cv.drawKeypoints(im1Gray, keypoints1, keypoints1_img, keypointcolor);
-//   cv.drawKeypoints(im2Gray, keypoints2, keypoints2_img, keypointcolor); //cv.DrawMatchesFlags_DRAW_RICH_KEYPOINTS);//,
-
-//   cv.imshow('keypoints1', keypoints1_img);
-//   cv.imshow('keypoints2', keypoints2_img);
 
   // use to debug and list out all the keypoints
   console.log("there are a total of ", keypoints1.size(), " keypoints1 (img to aligned) and ", keypoints2.size(), " keypoints2 (reference)");
@@ -385,16 +358,6 @@ function Align_img() {
       points1.push(keypoints1.get(good_matches.get(i).queryIdx ).pt.y );
       points2.push(keypoints2.get(good_matches.get(i).trainIdx ).pt.x );
       points2.push(keypoints2.get(good_matches.get(i).trainIdx ).pt.y );
-
-      //this is a test
-      // points1[i][0] = keypoints1.get(good_matches.get(i).queryIdx ).pt.x;
-      // points1[i][1] = keypoints1.get(good_matches.get(i).queryIdx ).pt.y;
-      // points2[i][0] = keypoints2.get(good_matches.get(i).trainIdx ).pt.x;
-      // points2[i][1] = keypoints2.get(good_matches.get(i).trainIdx ).pt.y;
-
-      //from: https://answers.opencv.org/question/235594/opencvjs-findperspective-returns-wrong-corners-coordinates/
-      //points1.push_back( new cv.Point(keypoints1.get(good_matches.get(i).queryIdx).pt.x, keypoints1.get(good_matches.get(i).queryIdx).pt.y));
-      //points2.push_back( new cv.Point(keypoints2.get(good_matches.get(i).trainIdx).pt.x, keypoints2.get(good_matches.get(i).trainIdx).pt.y));
   }
   console.log("points1:", points1,"points2:", points2);
 
@@ -413,12 +376,6 @@ function Align_img() {
   // matFromArray expects (rows, cols, type, array)
   let mat1 = cv.matFromArray(numMatches, 1, cv.CV_32FC2, points1);
   let mat2 = cv.matFromArray(numMatches, 1, cv.CV_32FC2, points2);
- 
-   // this is a test
-   // var mat1 = new cv.Mat(points1.length,2,cv.CV_32F);
-   // mat1.data32F.set(points1);
-   // var mat2 = new cv.Mat(points2.length,2,cv.CV_32F);
-   // mat2.data32F.set(points2);
  
    getMatStats(mat1, "mat1 prior to homography");
    getMatStats(mat2, "mat2 prior to homography");
@@ -445,10 +402,6 @@ function Align_img() {
 
       getMatStats(findHomographyMask, "findHomographyMask"); //test
       console.log("here are the inliers from RANSAC, compare to the good_matches array above", findHomographyMask.rows);//test
-      //for (let i = 0; i < findHomographyMask.rows; ++i) {
-      //    console.log("inliers", findHomographyMask.data[i], "points2: ", points2[i]);
-      //}
-      // Mask has one element per match. If mask.data[i] === 1 it's an inlier.
       good_inlier_matches = new cv.DMatchVector();
       for (let i = 0; i < findHomographyMask.rows; ++i) {
           if (findHomographyMask.data[i] === 1) {
@@ -457,8 +410,6 @@ function Align_img() {
           }
       }
       var inlierMatches = new cv.Mat();
-      //cv.drawMatches(im1, keypoints1, im2, keypoints2, good_inlier_matches, inlierMatches, color);
-      //cv.imshow('inlierMatches', imMatches);
       console.log("Good Matches: ", good_matches.size(), " inlier Matches: ", good_inlier_matches.size());
 
       console.log("here are inlier good_matches");
@@ -466,19 +417,9 @@ function Align_img() {
           console.log("[" + r + "]", "good_inlier_matches: ", good_inlier_matches.get(r));
           //console.log(keypoints1[good_inlier_matches.get(r).queryIdx], keypoints2[good_inlier_matches.get(r).trainIdx]);
       }
-      // console.log("here are outlier good_matches (better said, BAD Matches)");
-      // for (let r = 0; r < bad_outlier_matches.size(); ++r) {
-      //     console.log("[" + r + "]", "good_outlier_matches: ", bad_outlier_matches.get(r));
-      // }
       
       let src = cv.matFromArray(3, 1, cv.CV_32FC2, [0,0,1]);
       getMatStats(src, "src");
-    
-//       src(0,0)=p.x; 
-//       src(1,0)=p.y; 
-//       src(2,0)=1.0; 
-
-//       cv::Mat_<double> dst = M*src; //USE MATRIX ALGEBRA 
   }
   getMatStats(findHomographyMask, "findHomographyMask");
   // free mask now that we used it (keep good_inlier_matches)
@@ -549,43 +490,6 @@ function drawMatchesOverlay() {
     circle(l1[0], l1[1], 6);
   }
 }
-
-// Draw transformed target rectangle on top of inputImageB (if homography available)
-//   if (h && !h.empty() && inputImageA && inputImageB) {
-//     const Hf = h.data64F;
-//     if (Hf && Hf.length === 9) {
-//       const H = [
-//         [Hf[0], Hf[1], Hf[2]],
-//         [Hf[3], Hf[4], Hf[5]],
-//         [Hf[6], Hf[7], Hf[8]]
-//       ];
-//       const wA = inputImageA.width, hA = inputImageA.height;
-//       const srcCorners = [
-//         [0, 0],
-//         [wA, 0],
-//         [wA, hA],
-//         [0, hA]
-//       ];
-//       const dst = srcCorners.map(([x, y]) => applyHomography(x, y, H));
-
-//       // convert dst (in imageB pixel coords) to screen coords respecting the flip used when drawing imageB:
-//       // screen_x = offsetB.x + inputImageB.width - dst.x
-//       const screenPts = dst.map(([x, y]) => [offsetB.x + inputImageB.width - x, offsetB.y + y]);
-
-//       // draw rectangle
-//       push();
-//       strokeWeight(3);
-//       stroke('cyan');
-//       noFill();
-//       beginShape();
-//       for (let i = 0; i < screenPts.length; ++i) {
-//         vertex(screenPts[i][0], screenPts[i][1]);
-//       }
-//       endShape(CLOSE);
-//       pop();
-//     }
-//   }
-// }
 
 function getMatStats(Mat, name)
 {
@@ -662,49 +566,6 @@ function cvMatToP5Image(mat, image) {
   tempCanvas.remove();
 }
 
-function drawImageWithHomography(img, H_flat) {
-  // validate inputs
-  if (!img || !H_flat || H_flat.length !== 9) return;
-
-  // build 3x3 homography
-  const H = [
-    [H_flat[0], H_flat[1], H_flat[2]],
-    [H_flat[3], H_flat[4], H_flat[5]],
-    [H_flat[6], H_flat[7], H_flat[8]]
-  ];
-
-  // source image corners (pixel coords)
-  const w = img.width;
-  const h = img.height;
-  const srcCorners = [
-    [0, 0],
-    [w, 0],
-    [w, h],
-    [0, h]
-  ];
-
-  // map corners through H
-  const dst = srcCorners.map(([x, y]) => applyHomography(x, y, H));
-
-  // draw textured quad in current coordinate space (caller must set translate/scale to match)
-  push();
-  noStroke();
-  fill(255);
-  textureMode(NORMAL);   // use normalized UVs [0..1]
-  texture(img);
-  beginShape();
-  // UVs: top-left (0,0), top-right (1,0), bottom-right (1,1), bottom-left (0,1)
-  const uvs = [[0,0],[1,0],[1,1],[0,1]];
-  for (let i = 0; i < 4; ++i) {
-    const [x, y] = dst[i];
-    const [u, v] = uvs[i];
-    // vertex(x, y, u, v) maps image pixel UV to vertex position
-    vertex(x, y, u, v);
-  }
-  endShape(CLOSE);
-  pop();
-}
-
 // Function to apply homography matrix
 function applyHomography(x, y, H) {
   let newX = H[0][0] * x + H[0][1] * y + H[0][2];
@@ -754,6 +615,7 @@ function imageToScreen(index, px, py) {
   return [x, y];
 }
 
+//TODO: add this to shimage.js
 function canvasToP5Image(canvas, p5img, options = { flipX: false, flipY: false }) {
   if (!canvas || !p5img) return;
   const ctx = canvas.getContext('2d');
