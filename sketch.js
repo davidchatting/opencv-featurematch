@@ -1,3 +1,8 @@
+const imageTransforms = [
+  { x: 150, y: 50,  scaleX: 1.0, scaleY: 1.0 },  // image A
+  { x: 150, y: 500, scaleX: 1.0, scaleY: 1.0 }   // image B
+];
+
 var image_A_element = null;
 var image_B_element = null;
 var button;
@@ -8,6 +13,7 @@ var points1 = [];
 var points2 = [];
 var good_inlier_matches;
 var h;
+var good_matches_global = null; // store matches so draw() can render them
 
 function preload() {
   image_A_element = document.getElementById('image_A_element_id');
@@ -25,12 +31,15 @@ function preload() {
 }
 
 function setup() {
-  canvas = createCanvas(800, 800);
+  // Use WEBGL so texture()/vertex(u,v) in drawImageWithHomography works
+  canvas = createCanvas(800, 800, WEBGL);
   canvas.parent("p5jsCanvas");
   
   button = createButton('click me');
   button.position(0, 0);
   button.mousePressed(buttonClick);
+  // ensure texture UVs use normalized coordinates
+  textureMode(NORMAL);
 }
 
 function setupWhenImageLoaded() {
@@ -45,71 +54,124 @@ function draw() {
   background(220);
   
   push();
-  if(inputImageA) {
-    tint(255, 127);
-    push();
-    translate(150, 50); 
-    //translate(width/2, height/2); 
-    //scale(min(width/inputImageA.width, height/inputImageA.height));  //scale the image to fit the canvas
-    //translate(-inputImageA.width/2, -inputImageA.height/2);          //centre the image
+    // convert WEBGL origin (center) back to top-left so existing translate() offsets keep working
+    translate(-width / 2, -height / 2);
+    withImageTransform(0, () => {
+      tint(255, 127);
+      image(inputImageA, 0, 0, inputImageA.width, inputImageA.height);
+    });
+
+    withImageTransform(1, () => {
+      tint(255, 127);
+      image(inputImageB, 0, 0, inputImageB.width, inputImageB.height);
+    });
 
     push();
-    //TODO: why are these images reversed?
-    scale(-1,1);
-    translate(-inputImageA.width,0);
-    image(inputImageA, 0, 0, inputImageA.width, inputImageA.height);
+      // draw matches overlay last so lines appear on top
+      // keep this inside the same top-left transform so coordinates match the points/circles
+      try {
+        const gl = drawingContext;
+        if (gl && gl.disable) gl.disable(gl.DEPTH_TEST);
+      } catch (e) { /* ignore if unavailable */ }
+      drawMatchesOverlay();
+      try {
+        const gl = drawingContext;
+        if (gl && gl.enable) gl.enable(gl.DEPTH_TEST);
+      } catch (e) { /* ignore if unavailable */ }
+    // close the initial top-left transform
     pop();
-    //console.log(inputImageA.width, inputImageA.height);
-    
-    for(var i=0;i<(points1.length/2);++i){
-        circle(points1[(i*2)+0],points1[(i*2)+1],10);
-    }
-    
-    pop();
-  }
-  
-  if(inputImageB) {
-    tint(255, 127);
-    push();
-    translate(150, 500); 
-    //translate(width/2, height/2);
-    
-    //scale(min(width/inputImageB.width, height/inputImageB.height));  //scale the image to fit the canvas
-    //translate(-inputImageB.width/2, -inputImageB.height/2);          //centre the image
-    /*
-    if(h && !h.empty()) {
-      applyMatrix(
-        h.data64F[0], h.data64F[1], h.data64F[2],
-        h.data64F[3], h.data64F[4], h.data64F[5],
-        h.data64F[6], h.data64F[7], h.data64F[8],
-      );
-    }
-    */
-    if(points2.length > 0) {
-      //console.log(points2[0], points2[1])
-    }
-    for(var i=0;i<(points2.length/2);++i){
-        circle(points2[(i*2)+0],points2[(i*2)+1],10);
-    }
-    
-    if(h && !h.empty()) {
-      drawImageWithHomography(inputImageB, h.data64F);
-    }
-    
-    push();
-    //TODO: why are these images reversed?
-    scale(-1,1);
-    translate(-inputImageB.width,0);
-    image(inputImageB, 0, 0, inputImageB.width, inputImageB.height);
-    pop();
-    
-    pop();
-  }
+
+    drawHomographyOutline();
   pop();
 }
 
+// Draw the warped inputImageA outline (where inputImageA would land on inputImageB)
+// NOTE: this version assumes it is called inside the same transform used to draw inputImageB
+// (i.e. after translate(150,500); scale(-1,1); translate(-inputImageB.width,0); image(...))
+function drawHomographyOutline() {
+  // draw image A projected into B, and image B projected into A (black outlines)
+  if (!h || h.empty() || !inputImageA || !inputImageB) return;
+
+  const Hf = h.data64F;
+  if (!Hf || Hf.length !== 9) return;
+
+  // build H as 3x3 array
+  const H = [
+    [Hf[0], Hf[1], Hf[2]],
+    [Hf[3], Hf[4], Hf[5]],
+    [Hf[6], Hf[7], Hf[8]]
+  ];
+
+  // helper: invert 3x3 homography
+  function invert3x3(M) {
+    const a=M[0][0], b=M[0][1], c=M[0][2];
+    const d=M[1][0], e=M[1][1], f=M[1][2];
+    const g=M[2][0], h=M[2][1], i=M[2][2];
+    const cof00 =   (e*i - f*h);
+    const cof01 = - (d*i - f*g);
+    const cof02 =   (d*h - e*g);
+    const cof10 = - (b*i - c*h);
+    const cof11 =   (a*i - c*g);
+    const cof12 = - (a*h - b*g);
+    const cof20 =   (b*f - c*e);
+    const cof21 = - (a*f - c*d);
+    const cof22 =   (a*e - b*d);
+    const det = a*cof00 + b*cof01 + c*cof02;
+    if (!isFinite(det) || Math.abs(det) < 1e-12) return null;
+    const invDet = 1.0 / det;
+    // inverse = transpose(cofactorMatrix) * (1/det)
+    return [
+      [cof00*invDet, cof10*invDet, cof20*invDet],
+      [cof01*invDet, cof11*invDet, cof21*invDet],
+      [cof02*invDet, cof12*invDet, cof22*invDet]
+    ];
+  }
+
+  // source corners
+  const cornersA = [[0,0],[inputImageA.width,0],[inputImageA.width,inputImageA.height],[0,inputImageA.height]];
+  const cornersB = [[0,0],[inputImageB.width,0],[inputImageB.width,inputImageB.height],[0,inputImageB.height]];
+
+  // project A -> B using H
+  const dstAinB = cornersA.map(([x,y]) => applyHomography(x,y,H));
+  // draw that polygon in B image space using withImageTransform(1,...)
+  withImageTransform(1, () => {
+    push();
+      noFill();
+      strokeWeight(3);
+      stroke(0); // black
+      beginShape();
+      for (let p of dstAinB) vertex(p[0], p[1]);
+      endShape(CLOSE);
+    pop();
+  });
+
+  // compute inverse and project B -> A
+  const Hinv = invert3x3(H);
+  if (Hinv) {
+    const dstBinA = cornersB.map(([x,y]) => applyHomography(x,y,Hinv));
+    withImageTransform(0, () => {
+      push();
+        noFill();
+        strokeWeight(3);
+        stroke(0); // black
+        beginShape();
+        for (let p of dstBinA) vertex(p[0], p[1]);
+        endShape(CLOSE);
+      pop();
+    });
+  } else {
+    // unable to invert homography; optionally draw nothing for B->A
+    console.warn('drawHomographyOutline: homography not invertible, skipping B->A outline');
+  }
+}
+
 function Align_img() {
-  //Based on: https://scottsuhy.com/2021/02/01/image-alignment-feature-based-in-opencv-js-javascript/
+   //Based on: https://scottsuhy.com/2021/02/01/image-alignment-feature-based-in-opencv-js-javascript/
+   // reset previous state so repeated presses don't append results
+   points1 = [];
+   points2 = [];
+   good_inlier_matches = new cv.DMatchVector();
+   good_matches_global = null;
 
   let detector_option = 2;  //KAZE document.getElementById('detector').value;
   let match_option = 1;  //knnMatch document.getElementById('match').value;
@@ -232,6 +294,8 @@ function Align_img() {
   //34            matcher->match(descriptors1, descriptors2, matches, Mat());
 
   let good_matches = new cv.DMatchVector();
+  // expose matches to drawing routine
+  good_matches_global = good_matches;
 
   if(match_option == 0){//match
       console.log("using match...");
@@ -339,35 +403,41 @@ function Align_img() {
   //let mat1 = cv.matFromArray(points1.length, 1, cv.CV_32FC2, points1);
   //let mat2 = cv.matFromArray(points2.length, 1, cv.CV_32FC2, points2);
 
-  var mat1 = new cv.Mat(points1.length,1,cv.CV_32FC2);
-  mat1.data32F.set(points1);
-  var mat2 = new cv.Mat(points2.length,1,cv.CV_32FC2);
-  mat2.data32F.set(points2);
-
-  // this is a test
-  // var mat1 = new cv.Mat(points1.length,2,cv.CV_32F);
-  // mat1.data32F.set(points1);
-  // var mat2 = new cv.Mat(points2.length,2,cv.CV_32F);
-  // mat2.data32F.set(points2);
-
-  getMatStats(mat1, "mat1 prior to homography");
-  getMatStats(mat2, "mat2 prior to homography");
-
-  console.error("STEP 8: CALCULATE HOMOGRAPHY USING MAT1 and MAT2 ******************************************");
+  // Create mats with one row per MATCH (not one row per float).
+  // number of matches == good_matches.size()
+  const numMatches = good_matches.size();
+  if (numMatches === 0) {
+    console.error("No matches found, aborting homography step.");
+    return;
+  }
+  // matFromArray expects (rows, cols, type, array)
+  let mat1 = cv.matFromArray(numMatches, 1, cv.CV_32FC2, points1);
+  let mat2 = cv.matFromArray(numMatches, 1, cv.CV_32FC2, points2);
+ 
+   // this is a test
+   // var mat1 = new cv.Mat(points1.length,2,cv.CV_32F);
+   // mat1.data32F.set(points1);
+   // var mat2 = new cv.Mat(points2.length,2,cv.CV_32F);
+   // mat2.data32F.set(points2);
+ 
+   getMatStats(mat1, "mat1 prior to homography");
+   getMatStats(mat2, "mat2 prior to homography");
+ 
+   console.error("STEP 8: CALCULATE HOMOGRAPHY USING MAT1 and MAT2 ******************************************");
   //59            Find homography
   //60            h = findHomography( points1, points2, RANSAC );
   //Reference: https://docs.opencv.org/3.3.0/d9/d0c/group__calib3d.html#ga4abc2ece9fab9398f2e560d53c8c9780
   //mat1:	Coordinates of the points in the original plane, a matrix of the type CV_32FC2 or vector<Point2f> .
   //mat2:	Coordinates of the points in the target plane, a matrix of the type CV_32FC2 or a vector<Point2f> .
 
-  let findHomographyMask = new cv.Mat();//test
+  let findHomographyMask = new cv.Mat();
   h = cv.findHomography(mat1, mat2, cv.RANSAC, 3, findHomographyMask);
-  if (h.empty())
-  {
-      alert("homography matrix empty!");
-      return;
-  }
-  else{
+   if (h.empty())
+   {
+       alert("homography matrix empty!");
+       return;
+   }
+   else{
       console.log("h:", h);
       console.log("[", h.data64F[0],",", h.data64F[1], ",",h.data64F[2]);
       console.log("", h.data64F[3],",", h.data64F[4], ",", h.data64F[5]);
@@ -378,28 +448,17 @@ function Align_img() {
       //for (let i = 0; i < findHomographyMask.rows; ++i) {
       //    console.log("inliers", findHomographyMask.data[i], "points2: ", points2[i]);
       //}
+      // Mask has one element per match. If mask.data[i] === 1 it's an inlier.
       good_inlier_matches = new cv.DMatchVector();
-      for (let i = 0; i < findHomographyMask.rows; i=i+2) {
-          if(findHomographyMask.data[i] === 1 || findHomographyMask.data[i+1] === 1) {
-              let x = points2[i];
-              let y = points2[i + 1];
-              //console.log("i: ", i, " x: ", x, " y: ", y, "   Found it in points2!");s
-              for (let j = 0; j < keypoints2.size(); ++j) {
-                  if (x === keypoints2.get(j).pt.x && y === keypoints2.get(j).pt.y) {
-                      //console.log("  -- j: ", j, "    Found item in keypoints2!")
-                      for (let k = 0; k < good_matches.size(); ++k) {
-                          if (j === good_matches.get(k).trainIdx) {
-                              //console.log("  -- k: ", k, "    Found item in good_matches!")
-                              good_inlier_matches.push_back(good_matches.get(k));
-                          }
-                      }
-                  }
-              }
+      for (let i = 0; i < findHomographyMask.rows; ++i) {
+          if (findHomographyMask.data[i] === 1) {
+              // the i-th mask entry corresponds to the i-th match in good_matches
+              good_inlier_matches.push_back(good_matches.get(i));
           }
       }
       var inlierMatches = new cv.Mat();
       //cv.drawMatches(im1, keypoints1, im2, keypoints2, good_inlier_matches, inlierMatches, color);
-      //cv.imshow('inlierMatches', inlierMatches);
+      //cv.imshow('inlierMatches', imMatches);
       console.log("Good Matches: ", good_matches.size(), " inlier Matches: ", good_inlier_matches.size());
 
       console.log("here are inlier good_matches");
@@ -422,17 +481,18 @@ function Align_img() {
 //       cv::Mat_<double> dst = M*src; //USE MATRIX ALGEBRA 
   }
   getMatStats(findHomographyMask, "findHomographyMask");
+  // free mask now that we used it (keep good_inlier_matches)
+  // (if you still need findHomographyMask for debug then remove this delete)
+  findHomographyMask.delete();
 
   console.error("STEP 9: WARP IMAGE TO ALIGN WITH REFERENCE **************************************************");
   //62          Use homography to warp image
   //63          warpPerspective(im1, im1Reg, h, im2.size());
   //Reference: https://docs.opencv.org/master/da/d54/group__imgproc__transform.html#gaf73673a7e8e18ec6963e3774e6a94b87
-  /* DJC
   let image_B_final_result = new cv.Mat();
   cv.warpPerspective(im1, image_B_final_result, h, im2.size());
   //cv.imshow('image_Aligned', image_B_final_result);
   getMatStats(image_B_final_result, "finalMat");
-  */
 
   //X.delete();
   descriptors1.delete();
@@ -451,6 +511,81 @@ function Align_img() {
   mat2.delete();
   //inlierMatches.delete();
 }
+
+// Draw matches overlay between the two displayed images.
+// Good matches that are in good_inlier_matches -> green; the rest -> red.
+function drawMatchesOverlay() {
+  if (!good_matches_global || good_matches_global.size() === 0) return;
+
+  strokeWeight(2);
+
+  // We compute screen coords for lines (taking the horizontal flip into account),
+  // but draw the endpoint markers inside the SAME transforms used to render the images
+  // so markers align exactly with the textured images.
+  for (let i = 0; i < good_matches_global.size(); ++i) {
+    const m = good_matches_global.get(i);
+    const px1 = points1[i * 2 + 0];
+    const py1 = points1[i * 2 + 1];
+    const px2 = points2[i * 2 + 0];
+    const py2 = points2[i * 2 + 1];
+
+    // determine if this match is an inlier
+    let isInlier = false;
+    if (good_inlier_matches && good_inlier_matches.size && good_inlier_matches.size() > 0) {
+      for (let j = 0; j < good_inlier_matches.size(); ++j) {
+        const im = good_inlier_matches.get(j);
+        if (im.queryIdx === m.queryIdx && im.trainIdx === m.trainIdx) {
+          isInlier = true;
+          break;
+        }
+      }
+    }
+
+    let l0=imageToScreen(0, px1, py1);
+    let l1=imageToScreen(1, px2, py2);
+    stroke(isInlier ? 'lime' : 'red');
+    circle(l0[0], l0[1], 6);
+    line(l0[0], l0[1], l1[0], l1[1]);
+    circle(l1[0], l1[1], 6);
+  }
+}
+
+// Draw transformed target rectangle on top of inputImageB (if homography available)
+//   if (h && !h.empty() && inputImageA && inputImageB) {
+//     const Hf = h.data64F;
+//     if (Hf && Hf.length === 9) {
+//       const H = [
+//         [Hf[0], Hf[1], Hf[2]],
+//         [Hf[3], Hf[4], Hf[5]],
+//         [Hf[6], Hf[7], Hf[8]]
+//       ];
+//       const wA = inputImageA.width, hA = inputImageA.height;
+//       const srcCorners = [
+//         [0, 0],
+//         [wA, 0],
+//         [wA, hA],
+//         [0, hA]
+//       ];
+//       const dst = srcCorners.map(([x, y]) => applyHomography(x, y, H));
+
+//       // convert dst (in imageB pixel coords) to screen coords respecting the flip used when drawing imageB:
+//       // screen_x = offsetB.x + inputImageB.width - dst.x
+//       const screenPts = dst.map(([x, y]) => [offsetB.x + inputImageB.width - x, offsetB.y + y]);
+
+//       // draw rectangle
+//       push();
+//       strokeWeight(3);
+//       stroke('cyan');
+//       noFill();
+//       beginShape();
+//       for (let i = 0; i < screenPts.length; ++i) {
+//         vertex(screenPts[i][0], screenPts[i][1]);
+//       }
+//       endShape(CLOSE);
+//       pop();
+//     }
+//   }
+// }
 
 function getMatStats(Mat, name)
 {
@@ -523,42 +658,51 @@ function cvMatToP5Image(mat, image) {
   
   cv.imshow('tempCanvas', mat);
   
-  canvasToP5Image(tempCanvas, image);
+  canvasToP5Image(tempCanvas, image, { flipX: false, flipY: false });
   tempCanvas.remove();
 }
 
 function drawImageWithHomography(img, H_flat) {
-  fill(0);
-  rect(0,0,100,100);
-  
-  if (!img || H_flat.length !== 9) return; // Ensure valid input
+  // validate inputs
+  if (!img || !H_flat || H_flat.length !== 9) return;
 
-  let H = [
+  // build 3x3 homography
+  const H = [
     [H_flat[0], H_flat[1], H_flat[2]],
     [H_flat[3], H_flat[4], H_flat[5]],
     [H_flat[6], H_flat[7], H_flat[8]]
   ];
 
-  let w = img.width / 2, h = img.height / 2;
-
-  // Define original image corners
-  let srcCorners = [
-    [-w, -h], [w, -h], [w, h], [-w, h]
+  // source image corners (pixel coords)
+  const w = img.width;
+  const h = img.height;
+  const srcCorners = [
+    [0, 0],
+    [w, 0],
+    [w, h],
+    [0, h]
   ];
 
-  // Apply homography to get new corners
-  let dstCorners = srcCorners.map(([x, y]) => applyHomography(x, y, H));
+  // map corners through H
+  const dst = srcCorners.map(([x, y]) => applyHomography(x, y, H));
 
-  //console.log('dstCorners', dstCorners);
-  
-  //texture(img);
+  // draw textured quad in current coordinate space (caller must set translate/scale to match)
+  push();
+  noStroke();
+  fill(255);
+  textureMode(NORMAL);   // use normalized UVs [0..1]
+  texture(img);
   beginShape();
-  for (let i = 0; i < 4; i++) {
-    let [x, y] = dstCorners[i];
-    let u = i % 2, v = Math.floor(i / 2); // Texture coordinates (0 or 1)
-    vertex(x, y, 0, u, v);
+  // UVs: top-left (0,0), top-right (1,0), bottom-right (1,1), bottom-left (0,1)
+  const uvs = [[0,0],[1,0],[1,1],[0,1]];
+  for (let i = 0; i < 4; ++i) {
+    const [x, y] = dst[i];
+    const [u, v] = uvs[i];
+    // vertex(x, y, u, v) maps image pixel UV to vertex position
+    vertex(x, y, u, v);
   }
   endShape(CLOSE);
+  pop();
 }
 
 // Function to apply homography matrix
@@ -568,4 +712,84 @@ function applyHomography(x, y, H) {
   let newW = H[2][0] * x + H[2][1] * y + H[2][2]; // Homogeneous coordinate
 
   return [newX / newW, newY / newW]; // Normalize
+}
+
+function withImageTransform(index, callback) {
+  const view = imageTransforms[index];
+  const img = (index === 0) ? inputImageA : inputImageB;
+
+  if(!view || !img) return;
+  push();
+    translate(view.x, view.y);
+    // apply uniform per-axis scale/flip
+    push();
+      scale(view.scaleX, view.scaleY);
+      // when flipped horizontally we need to offset to keep top-left origin for pixel coords
+      if (view.scaleX < 0) translate(-img.width, 0);
+      callback();
+    pop();
+  pop();
+}
+
+function imageToScreen(index, px, py) {
+  const view = imageTransforms[index];
+  const img = (index === 0) ? inputImageA : inputImageB;
+  if (!view || !img) return null;
+
+  const sxScale = view.scaleX !== undefined ? view.scaleX : 1;
+  const syScale = view.scaleY !== undefined ? view.scaleY : 1;
+
+  let x, y;
+  if (sxScale < 0) {
+    // withImageTransform does: translate(view.x,view.y); scale(sx,sy); translate(-img.width,0);
+    // so effective point = view + scale * ( [px,py] + [-img.width,0] )
+    x = view.x + sxScale * (px - img.width);
+    y = view.y + syScale * (py);
+  } else {
+    // no pre-translate for flip
+    x = view.x + sxScale * px;
+    y = view.y + syScale * py;
+  }
+
+  return [x, y];
+}
+
+function canvasToP5Image(canvas, p5img, options = { flipX: false, flipY: false }) {
+  if (!canvas || !p5img) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+  const src = ctx.getImageData(0, 0, w, h).data; // Uint8ClampedArray (RGBA, top-left origin)
+
+  // ensure p5 image is correct size
+  if (p5img.width !== w || p5img.height !== h) {
+    p5img.resize(w, h);
+  }
+
+  p5img.loadPixels();
+  const dst = p5img.pixels; // Uint8ClampedArray
+
+  const flipX = !!options.flipX;
+  const flipY = !!options.flipY;
+
+  if (!flipX && !flipY) {
+    // fast path: identical layout
+    dst.set(src);
+  } else {
+    // copy with optional flips
+    for (let y = 0; y < h; ++y) {
+      const ty = flipY ? (h - 1 - y) : y;
+      for (let x = 0; x < w; ++x) {
+        const tx = flipX ? (w - 1 - x) : x;
+        const sIdx = (ty * w + tx) * 4;
+        const dIdx = (y * w + x) * 4;
+        dst[dIdx]     = src[sIdx];
+        dst[dIdx + 1] = src[sIdx + 1];
+        dst[dIdx + 2] = src[sIdx + 2];
+        dst[dIdx + 3] = src[sIdx + 3];
+      }
+    }
+  }
+
+  p5img.updatePixels();
 }
