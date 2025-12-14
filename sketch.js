@@ -442,7 +442,11 @@ function Align_img() {
   im1Gray.delete();
   im2Gray.delete();
   //h.delete();
-  image_B_final_result.delete();  //DJC
+  // image_B_final_result may not have been created (warpPerspective is commented out).
+  // Guard deletion to avoid ReferenceError.
+  if (typeof image_B_final_result !== 'undefined' && image_B_final_result !== null) {
+    try { image_B_final_result.delete(); } catch (e) { console.warn('failed to delete image_B_final_result:', e); }
+  }
   mat1.delete();
   mat2.delete();
   //inlierMatches.delete();
