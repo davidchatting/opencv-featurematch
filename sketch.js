@@ -1,11 +1,10 @@
 const imageTransforms = [
-  { x: 150, y: 50,  scaleX: 1.0, scaleY: 1.0 },  // image A
-  { x: 150, y: 500, scaleX: 1.0, scaleY: 1.0 }   // image B
+  { x: 0, y: 50,  scaleX: 1.0, scaleY: 1.0 },  // image A
+  { x: 800, y: 50, scaleX: 1.0, scaleY: 1.0 }   // image B
 ];
 
 var image_A_element = null;
 var image_B_element = null;
-var button;
 var canvas;
 
 var inputImageA = null, inputImageB = null;
@@ -29,18 +28,11 @@ function preload() {
 
 function setup() {
   // Use WEBGL so texture()/vertex(u,v) in drawImageWithHomography works
-  canvas = createCanvas(800, 800, WEBGL);
+  canvas = createCanvas(1600, 800, WEBGL);
   canvas.parent("p5jsCanvas");
   
-  button = createButton('click me');
-  button.position(0, 0);
-  button.mousePressed(buttonClick);
   // ensure texture UVs use normalized coordinates
   textureMode(NORMAL);
-}
-
-function buttonClick() {
-  Align_img();
 }
 
 function draw() {
@@ -158,7 +150,7 @@ function drawHomographyOutline() {
   }
 }
 
-function Align_img() {
+function Align_img(elementID_a, elementID_b) {
    //Based on: https://scottsuhy.com/2021/02/01/image-alignment-feature-based-in-opencv-js-javascript/
    // reset previous state so repeated presses don't append results
    points1 = [];
@@ -174,7 +166,7 @@ function Align_img() {
 
   console.error("STEP 1: READ IN IMAGES **********************************************************************");
   //im2 is the original reference image we are trying to align to
-  let im2 = cv.imread('image_A_element_id');
+  let im2 = cv.imread(elementID_a);
   getMatStats(im2, "original reference image");
   //im1 is the image we are trying to line up correctly
   
@@ -182,7 +174,7 @@ function Align_img() {
   inputImageB = createImage(resultSize.width, resultSize.height);
   cvMatToP5Image(im2, inputImageB);
   
-  let im1 = cv.imread(image_B_element);
+  let im1 = cv.imread(elementID_b);
   
   resultSize = im1.size();
   inputImageA = createImage(resultSize.width, resultSize.height);
