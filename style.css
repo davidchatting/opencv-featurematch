@@ -7,6 +7,6 @@ canvas {
   display: block;
 }
 
-.hide {
+#media {
   visibility: hidden;
 }
