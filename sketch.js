@@ -1,6 +1,12 @@
 const imageTransforms = [
-  { x: 0, y: 50,  scaleX: 1.0, scaleY: 1.0 },  // image A
-  { x: 800, y: 50, scaleX: 1.0, scaleY: 1.0 }   // image B
+  // image A: translate(0,50), scale(1,1)
+  [[1, 0, 0],
+   [0, 1, 50],
+   [0, 0, 1]],
+  // image B: translate(800,50), scale(1,1)
+  [[1, 0, 800],
+   [0, 1, 50],
+   [0, 0, 1]]
 ];
 
 var image_A_element = null;
@@ -14,25 +20,50 @@ var good_inlier_matches;
 var h;
 var good_matches_global = null; // store matches so draw() can render them
 
-function preload() {
-  image_A_element = document.getElementById('image_A_element_id');
-  image_A_element.setAttribute('crossOrigin', 'Anonymous');
-  image_A_element.setAttribute('src', 'images/box.png');
-  image_A_element.classList.add('hide');
-
-  image_B_element = document.getElementById('image_B_element_id');
-  image_B_element.setAttribute('crossOrigin', 'Anonymous');
-  image_B_element.setAttribute('src', 'images/box_in_scene.png');
-  image_B_element.classList.add('hide');
-}
-
 function setup() {
   // Use WEBGL so texture()/vertex(u,v) in drawImageWithHomography works
   canvas = createCanvas(1600, 800, WEBGL);
-  canvas.parent("p5jsCanvas");
+  canvas.drop(onFileDropped);
   
   // ensure texture UVs use normalized coordinates
   textureMode(NORMAL);
+}
+
+function onFileDropped(file) {
+  console.log("Dropped file: " + file.name);
+  const div = upsertMedia(file.name);
+
+  const img = createImg(file.data, () => {
+    console.log('Image loaded:', file.name);
+    console.log('Image dimensions:', img.width, 'x', img.height);
+
+    // images.set(file.name, { file, img });
+    // parseMetadata(file.name, img);
+    const mediaElement = select('#media')?.elt;
+    if(mediaElement) {
+      if(mediaElement.childElementCount === 2){
+        console.log("Two images loaded, starting alignment...");
+        Align_img(mediaElement.children[0].querySelector('.original') , mediaElement.children[1].querySelector('.original'));
+      }
+    }
+  });
+  img.parent(div);
+  img.addClass('original');
+}
+
+function upsertMedia(id) {
+  if (!id) return null;
+
+  let container = select('#media');
+  if (!container) return null;
+
+  const found = container.elt.querySelector('#' + id);
+  if (found) return select('#' + id); // use p5.select to return a p5.Element
+
+  const d = createDiv('');
+  d.id(id);
+  d.parent(container);
+  return d;
 }
 
 function draw() {
@@ -41,15 +72,19 @@ function draw() {
   push();
     // convert WEBGL origin (center) back to top-left so existing translate() offsets keep working
     translate(-width / 2, -height / 2);
-    withImageTransform(0, () => {
-      tint(255, 127);
-      image(inputImageA, 0, 0, inputImageA.width, inputImageA.height);
-    });
+    if(inputImageA) {
+      withImageTransform(imageTransforms[0], () => {
+        tint(255, 127);
+          image(inputImageA, 0, 0, inputImageA.width, inputImageA.height);
+      });
+    }
 
-    withImageTransform(1, () => {
-      tint(255, 127);
-      image(inputImageB, 0, 0, inputImageB.width, inputImageB.height);
-    });
+    if(inputImageB) {
+      withImageTransform(imageTransforms[1], () => {
+        tint(255, 127);
+        image(inputImageB, 0, 0, inputImageB.width, inputImageB.height);
+      });
+    }
 
     push();
       // draw matches overlay last so lines appear on top
@@ -119,13 +154,13 @@ function drawHomographyOutline() {
   // project A -> B using H
   const dstAinB = cornersA.map(([x,y]) => applyHomography(x,y,H));
   // draw that polygon in B image space using withImageTransform(1,...)
-  withImageTransform(1, () => {
+  withImageTransform(imageTransforms[1], () => {
     push();
       noFill();
       strokeWeight(3);
       stroke(0); // black
       beginShape();
-      for (let p of dstAinB) vertex(p[0], p[1]);
+        for (let p of dstAinB) vertex(p[0], p[1]);
       endShape(CLOSE);
     pop();
   });
@@ -134,7 +169,7 @@ function drawHomographyOutline() {
   const Hinv = invert3x3(H);
   if (Hinv) {
     const dstBinA = cornersB.map(([x,y]) => applyHomography(x,y,Hinv));
-    withImageTransform(0, () => {
+    withImageTransform(imageTransforms[0], () => {
       push();
         noFill();
         strokeWeight(3);
@@ -150,7 +185,7 @@ function drawHomographyOutline() {
   }
 }
 
-function Align_img(elementID_a, elementID_b) {
+function Align_img(image_element_a, image_element_b) {
    //Based on: https://scottsuhy.com/2021/02/01/image-alignment-feature-based-in-opencv-js-javascript/
    // reset previous state so repeated presses don't append results
    points1 = [];
@@ -166,7 +201,7 @@ function Align_img(elementID_a, elementID_b) {
 
   console.error("STEP 1: READ IN IMAGES **********************************************************************");
   //im2 is the original reference image we are trying to align to
-  let im2 = cv.imread(elementID_a);
+  let im2 = cv.imread(image_element_a);
   getMatStats(im2, "original reference image");
   //im1 is the image we are trying to line up correctly
   
@@ -174,7 +209,7 @@ function Align_img(elementID_a, elementID_b) {
   inputImageB = createImage(resultSize.width, resultSize.height);
   cvMatToP5Image(im2, inputImageB);
   
-  let im1 = cv.imread(elementID_b);
+  let im1 = cv.imread(image_element_b);
   
   resultSize = im1.size();
   inputImageA = createImage(resultSize.width, resultSize.height);
@@ -567,42 +602,31 @@ function applyHomography(x, y, H) {
   return [newX / newW, newY / newW]; // Normalize
 }
 
-function withImageTransform(index, callback) {
-  const view = imageTransforms[index];
-  const img = (index === 0) ? inputImageA : inputImageB;
+function withImageTransform(H, callback) {
+  if (!H || !callback) return;
 
-  if(!view || !img) return;
+  // detect simple affine of form [[sx,0,tx],[0,sy,ty],[0,0,1]]
+  const isSimpleAffine = (H[0][1] === 0 && H[1][0] === 0 && H[2][0] === 0 && H[2][1] === 0 && H[2][2] === 1);
   push();
-    translate(view.x, view.y);
-    // apply uniform per-axis scale/flip
-    push();
-      scale(view.scaleX, view.scaleY);
-      // when flipped horizontally we need to offset to keep top-left origin for pixel coords
-      if (view.scaleX < 0) translate(-img.width, 0);
+    if (isSimpleAffine) {
+      const sx = H[0][0], sy = H[1][1], tx = H[0][2], ty = H[1][2];
+      translate(tx, ty);
+      scale(sx, sy);
       callback();
-    pop();
+    } else {
+      // General homography: cannot express with simple p5 transforms.
+      // Call callback so it can use imageToScreen/applyHomographyToPoint to draw in screen space.
+      callback();
+    }
   pop();
 }
 
 function imageToScreen(index, px, py) {
-  const view = imageTransforms[index];
-  const img = (index === 0) ? inputImageA : inputImageB;
-  if (!view || !img) return null;
-
-  const sxScale = view.scaleX !== undefined ? view.scaleX : 1;
-  const syScale = view.scaleY !== undefined ? view.scaleY : 1;
-
-  let x, y;
-  if (sxScale < 0) {
-    // withImageTransform does: translate(view.x,view.y); scale(sx,sy); translate(-img.width,0);
-    // so effective point = view + scale * ( [px,py] + [-img.width,0] )
-    x = view.x + sxScale * (px - img.width);
-    y = view.y + syScale * (py);
-  } else {
-    // no pre-translate for flip
-    x = view.x + sxScale * px;
-    y = view.y + syScale * py;
-  }
-
-  return [x, y];
+  const H = imageTransforms[index];
+  if (!H) return null;
+  // applyHomography is defined elsewhere and returns [x,y] in the same coordinate system as H
+  const [sx, sy] = applyHomography(px, py, H);
+  // draw() already sets the global top-left transform (translate(-width/2, -height/2)),
+  // so return values directly for drawing inside that transform.
+  return [sx, sy];
 }
