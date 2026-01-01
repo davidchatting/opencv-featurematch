@@ -47,9 +47,7 @@ function onFileDropped(file) {
         console.log("Two images loaded, starting alignment...");
         Align_img(mediaElement.children[0].querySelector('.original') , mediaElement.children[1].querySelector('.original'));
         if(h && !h.empty() && h.data64F) {
-          console.log("*** h", h.data64F);
-          const d = h.data64F; //invert3x3(h.data64F);
-          console.log("*** d", d);
+          const d = h.data64F;
           //flat 4x4 row-major so
           const M4 = [
             d[0], d[1], 0, d[2],
@@ -67,7 +65,7 @@ function onFileDropped(file) {
 }
 
   // draw a textured quad: srcImg projected by homography Hproj into target image space (targetIndex)
-  function drawProjectedTexture(srcImg, Hproj) {
+  function drawProjectedTexture(srcImg, x, y, Hproj) {
     if (!srcImg || !Hproj) return;
     const w = srcImg.width, h = srcImg.height;
     const corners = [0,0,w,0,w,h,0,h];
@@ -75,11 +73,8 @@ function onFileDropped(file) {
     const dst = [];
     for (let i = 0; i < corners.length; i += 2) {
       const p = applyTransform4x4(corners[i], corners[i + 1], Hproj) || [0, 0];
-      dst.push(p[0], p[1]);
+      dst.push(p[0]+x, p[1]+y);
     }
-    // convert to screen coords using applyTransform4x4 (accounts for imageTransforms)
-    // const screenPts = dst.map(([x,y]) => applyTransform4x4(x, y, Hproj));
-    // console.log("*** screenPts", screenPts);
     // draw textured polygon in WEBGL using normalized texture coords (0..1)
     push();
       try {
@@ -128,7 +123,7 @@ function draw() {
         tint(255, 127);
         //applyMatrix(imageTransforms[0]);
         //image(inputImageA, -inputImageA.width / 2, -inputImageA.height / 2, inputImageA.width, inputImageA.height);
-        drawProjectedTexture(inputImageA, imageTransforms[1]);
+        drawProjectedTexture(inputImageA, -inputImageA.width / 2, -inputImageA.height / 2,  imageTransforms[1]);
       pop();
       // withImageTransform(imageTransforms[0], () => {
       //   tint(255, 127);
@@ -144,7 +139,7 @@ function draw() {
         tint(255, 127);
         //applyMatrix(...imageTransforms[1]);
         //image(inputImageB, -inputImageB.width / 2, -inputImageB.height / 2, inputImageB.width, inputImageB.height);
-        drawProjectedTexture(inputImageB, imageTransforms[0]);
+        drawProjectedTexture(inputImageB, -inputImageB.width / 2, -inputImageB.height / 2, imageTransforms[0]);
       pop();
       // withImageTransform(imageTransforms[1], () => {
       //   tint(255, 127);
@@ -220,13 +215,13 @@ function drawHomographyOutline() {
   ];
 
   // A -> B
-  drawProjectedTexture(inputImageA, H);
+  drawProjectedTexture(inputImageA, -inputImageA.width / 2, -inputImageA.height / 2, H);
 
   // B -> A using inverse homography
   const Hinv = invert3x3(H);
   if (Hinv) {
     tint(255, 127);
-    drawProjectedTexture(inputImageB, Hinv);
+    drawProjectedTexture(inputImageB, -inputImageB.width / 2, -inputImageB.height / 2, Hinv);
   } else {
     console.warn('drawHomographyOutline: homography not invertible, skipping B->A textured projection');
   }
