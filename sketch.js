@@ -26,31 +26,52 @@ function onFileDropped(file) {
     console.log('Image loaded:', file.name);
     console.log('Image dimensions:', img.width, 'x', img.height);
 
-    // images.set(file.name, { file, img });
-    // parseMetadata(file.name, img);
-    const mediaElement = select('#media')?.elt;
-    if(mediaElement) {
-      const n = mediaElement.childElementCount;
-      
-      if(n === 2){
-        console.log("Two images loaded, starting alignment...");
-        Align_img(mediaElement.children[0].querySelector('.original') , mediaElement.children[1].querySelector('.original'));
-        if(h && !h.empty() && h.data64F) {
-          const d = h.data64F;
-          //flat 4x4 row-major so
-          const M4 = [
-            d[0], d[1], 0, d[2],
-            d[3], d[4], 0, d[5],
-            0   , 0   , 1, 0   ,
-            d[6], d[7], 0, d[8]
-          ];
-          imageTransforms[1] = M4;
-        }
-      }
+    img.parent(div);
+    img.addClass('original');
+
+    const lowresMaxPixels = 640 * 480;
+    if (img.width * img.height > lowresMaxPixels) {
+      const s = Math.sqrt(lowresMaxPixels / (img.width * img.height));
+
+      const targetW = Math.round(img.width * s);
+      const targetH = Math.round(img.height * s);
+
+      console.log('lowResImg dimensions:', targetW, 'x', targetH);
+      const g = createGraphics(targetW, targetH);
+      g.image(img, 0, 0, targetW, targetH);
+      const lowResDataUrl = g.elt.toDataURL("image/jpeg", 1.0);
+
+      const lowResImg = createImg(lowResDataUrl, '', processImages);
+      lowResImg.addClass('lowres');
+      lowResImg.parent(div);
+    }
+    else {
+      img.addClass('lowres');
+      processImages();
     }
   });
-  img.parent(div);
-  img.addClass('original');
+}
+
+function processImages() {
+  const mediaElement = select('#media')?.elt;
+  if(mediaElement) {
+    const n = mediaElement.childElementCount;
+    
+    if(n === 2){
+      console.log("Two images loaded, starting alignment...");
+      Align_img(mediaElement.children[0].querySelector('.lowres') , mediaElement.children[1].querySelector('.lowres'));
+      if(h && !h.empty() && h.data64F) {
+        const d = h.data64F;
+        //flat 4x4 row-major so
+        imageTransforms[1] = [
+          d[0], d[1], 0, d[2],
+          d[3], d[4], 0, d[5],
+          0   , 0   , 1, 0   ,
+          d[6], d[7], 0, d[8]
+        ];
+      }
+    }
+  }
 }
 
   // draw a textured quad: srcImg projected by homography Hproj into target image space (targetIndex)
