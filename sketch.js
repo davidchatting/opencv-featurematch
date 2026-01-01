@@ -1,12 +1,12 @@
 const imageTransforms = [
-  // image A: translate(0,50), scale(1,1)
-  [[1, 0, 0],
-   [0, 1, 50],
-   [0, 0, 1]],
-  // image B: translate(800,50), scale(1,1)
-  [[1, 0, 800],
-   [0, 1, 50],
-   [0, 0, 1]]
+  [1, 0, 0, 0,
+   0, 1, 0, 0,
+   0, 0, 1, 0,
+   0, 0, 0, 1],
+  [1, 0, 0, 100,
+   0, 1, 0,   0,
+   0, 0, 1,   0,
+   0, 0, 0,   1]
 ];
 
 var image_A_element = null;
@@ -33,7 +33,7 @@ function onFileDropped(file) {
   console.log("Dropped file: " + file.name);
   const div = upsertMedia(file.name);
 
-  const img = createImg(file.data, () => {
+  const img = createImg(file.data, '', () => {
     console.log('Image loaded:', file.name);
     console.log('Image dimensions:', img.width, 'x', img.height);
 
@@ -41,15 +41,66 @@ function onFileDropped(file) {
     // parseMetadata(file.name, img);
     const mediaElement = select('#media')?.elt;
     if(mediaElement) {
-      if(mediaElement.childElementCount === 2){
+      const n = mediaElement.childElementCount;
+      
+      if(n === 2){
         console.log("Two images loaded, starting alignment...");
         Align_img(mediaElement.children[0].querySelector('.original') , mediaElement.children[1].querySelector('.original'));
+        if(h && !h.empty() && h.data64F) {
+          console.log("*** h", h.data64F);
+          const d = h.data64F; //invert3x3(h.data64F);
+          console.log("*** d", d);
+          //flat 4x4 row-major so
+          const M4 = [
+            d[0], d[1], 0, d[2],
+            d[3], d[4], 0, d[5],
+            0   , 0   , 1, 0   ,
+            d[6], d[7], 0, d[8]
+          ];
+          imageTransforms[1] = M4;
+        }
       }
     }
   });
   img.parent(div);
   img.addClass('original');
 }
+
+  // draw a textured quad: srcImg projected by homography Hproj into target image space (targetIndex)
+  function drawProjectedTexture(srcImg, Hproj) {
+    if (!srcImg || !Hproj) return;
+    const w = srcImg.width, h = srcImg.height;
+    const corners = [0,0,w,0,w,h,0,h];
+    // project corners into target image pixel coords (corners is a flat array [x0,y0,...])
+    const dst = [];
+    for (let i = 0; i < corners.length; i += 2) {
+      const p = applyTransform4x4(corners[i], corners[i + 1], Hproj) || [0, 0];
+      dst.push(p[0], p[1]);
+    }
+    // convert to screen coords using applyTransform4x4 (accounts for imageTransforms)
+    // const screenPts = dst.map(([x,y]) => applyTransform4x4(x, y, Hproj));
+    // console.log("*** screenPts", screenPts);
+    // draw textured polygon in WEBGL using normalized texture coords (0..1)
+    push();
+      try {
+        const gl = drawingContext;
+        if (gl && gl.disable) gl.disable(gl.DEPTH_TEST);
+      } catch (e) {}
+      noStroke();
+      texture(srcImg);
+      beginShape();
+        // top-left (0,0) -> u=0,v=0 ; top-right -> u=1,v=0 ; bottom-right -> u=1,v=1 ; bottom-left -> u=0,v=1
+        vertex(dst[0], dst[1], 0, 0);
+        vertex(dst[2], dst[3], 1, 0);
+        vertex(dst[4], dst[5], 1, 1);
+        vertex(dst[6], dst[7], 0, 1);
+      endShape(CLOSE);
+      try {
+        const gl = drawingContext;
+        if (gl && gl.enable) gl.enable(gl.DEPTH_TEST);
+      } catch (e) {}
+    pop();
+  }
 
 function upsertMedia(id) {
   if (!id) return null;
@@ -71,117 +122,113 @@ function draw() {
   
   push();
     // convert WEBGL origin (center) back to top-left so existing translate() offsets keep working
-    translate(-width / 2, -height / 2);
+    //translate(-width / 2, -height / 2);
     if(inputImageA) {
-      withImageTransform(imageTransforms[0], () => {
+      push();
         tint(255, 127);
-          image(inputImageA, 0, 0, inputImageA.width, inputImageA.height);
-      });
+        //applyMatrix(imageTransforms[0]);
+        //image(inputImageA, -inputImageA.width / 2, -inputImageA.height / 2, inputImageA.width, inputImageA.height);
+        drawProjectedTexture(inputImageA, imageTransforms[1]);
+      pop();
+      // withImageTransform(imageTransforms[0], () => {
+      //   tint(255, 127);
+      //   image(inputImageA, 0, 0, inputImageA.width, inputImageA.height);
+      // });
+      //image(inputImageA, 0, 0, inputImageA.width, inputImageA.height);
+      //tint(255, 127);
+      //drawProjectedTexture(inputImageA, imageTransforms[0]);
     }
 
     if(inputImageB) {
-      withImageTransform(imageTransforms[1], () => {
+      push();
         tint(255, 127);
-        image(inputImageB, 0, 0, inputImageB.width, inputImageB.height);
-      });
+        //applyMatrix(...imageTransforms[1]);
+        //image(inputImageB, -inputImageB.width / 2, -inputImageB.height / 2, inputImageB.width, inputImageB.height);
+        drawProjectedTexture(inputImageB, imageTransforms[0]);
+      pop();
+      // withImageTransform(imageTransforms[1], () => {
+      //   tint(255, 127);
+      //   image(inputImageB, 0, 0, inputImageB.width, inputImageB.height);
+      // });
+      //drawProjectedTexture(inputImageB, imageTransforms[1]);
     }
 
+      /*
     push();
       // draw matches overlay last so lines appear on top
       // keep this inside the same top-left transform so coordinates match the points/circles
       try {
         const gl = drawingContext;
         if (gl && gl.disable) gl.disable(gl.DEPTH_TEST);
-      } catch (e) { /* ignore if unavailable */ }
+      } catch (e) { }
       drawMatchesOverlay();
       try {
         const gl = drawingContext;
         if (gl && gl.enable) gl.enable(gl.DEPTH_TEST);
-      } catch (e) { /* ignore if unavailable */ }
+      } catch (e) {}
     // close the initial top-left transform
     pop();
+    */
 
-    drawHomographyOutline();
+   //drawHomographyOutline();
   pop();
+}
+
+function invert3x3(M) {
+  if (!M) return null;
+
+  let a,b,c,d,e,f,g,h,i;
+  a = M[0]; b = M[1]; c = M[2];
+  d = M[3]; e = M[4]; f = M[5];
+  g = M[6]; h = M[7]; i = M[8];
+
+  const cof00 =   (e*i - f*h);
+  const cof01 = - (d*i - f*g);
+  const cof02 =   (d*h - e*g);
+  const cof10 = - (b*i - c*h);
+  const cof11 =   (a*i - c*g);
+  const cof12 = - (a*h - b*g);
+  const cof20 =   (b*f - c*e);
+  const cof21 = - (a*f - c*d);
+  const cof22 =   (a*e - b*d);
+  const det = a*cof00 + b*cof01 + c*cof02;
+  if (!isFinite(det) || Math.abs(det) < 1e-12) return null;
+  const invDet = 1.0 / det;
+
+  // return flat row-major 3x3 inverse:
+  return [
+    cof00 * invDet, cof10 * invDet, cof20 * invDet,
+    cof01 * invDet, cof11 * invDet, cof21 * invDet,
+    cof02 * invDet, cof12 * invDet, cof22 * invDet
+  ];
 }
 
 // Draw the warped inputImageA outline (where inputImageA would land on inputImageB)
 // NOTE: this version assumes it is called inside the same transform used to draw inputImageB
 // (i.e. after translate(150,500); scale(-1,1); translate(-inputImageB.width,0); image(...))
 function drawHomographyOutline() {
-  // draw image A projected into B, and image B projected into A (black outlines)
+  // draw textured projection: image A -> B and image B -> A
   if (!h || h.empty() || !inputImageA || !inputImageB) return;
 
   const Hf = h.data64F;
   if (!Hf || Hf.length !== 9) return;
 
-  // build H as 3x3 array
   const H = [
     [Hf[0], Hf[1], Hf[2]],
     [Hf[3], Hf[4], Hf[5]],
     [Hf[6], Hf[7], Hf[8]]
   ];
 
-  // helper: invert 3x3 homography
-  function invert3x3(M) {
-    const a=M[0][0], b=M[0][1], c=M[0][2];
-    const d=M[1][0], e=M[1][1], f=M[1][2];
-    const g=M[2][0], h=M[2][1], i=M[2][2];
-    const cof00 =   (e*i - f*h);
-    const cof01 = - (d*i - f*g);
-    const cof02 =   (d*h - e*g);
-    const cof10 = - (b*i - c*h);
-    const cof11 =   (a*i - c*g);
-    const cof12 = - (a*h - b*g);
-    const cof20 =   (b*f - c*e);
-    const cof21 = - (a*f - c*d);
-    const cof22 =   (a*e - b*d);
-    const det = a*cof00 + b*cof01 + c*cof02;
-    if (!isFinite(det) || Math.abs(det) < 1e-12) return null;
-    const invDet = 1.0 / det;
-    // inverse = transpose(cofactorMatrix) * (1/det)
-    return [
-      [cof00*invDet, cof10*invDet, cof20*invDet],
-      [cof01*invDet, cof11*invDet, cof21*invDet],
-      [cof02*invDet, cof12*invDet, cof22*invDet]
-    ];
-  }
+  // A -> B
+  drawProjectedTexture(inputImageA, H);
 
-  // source corners
-  const cornersA = [[0,0],[inputImageA.width,0],[inputImageA.width,inputImageA.height],[0,inputImageA.height]];
-  const cornersB = [[0,0],[inputImageB.width,0],[inputImageB.width,inputImageB.height],[0,inputImageB.height]];
-
-  // project A -> B using H
-  const dstAinB = cornersA.map(([x,y]) => applyHomography(x,y,H));
-  // draw that polygon in B image space using withImageTransform(1,...)
-  withImageTransform(imageTransforms[1], () => {
-    push();
-      noFill();
-      strokeWeight(3);
-      stroke(0); // black
-      beginShape();
-        for (let p of dstAinB) vertex(p[0], p[1]);
-      endShape(CLOSE);
-    pop();
-  });
-
-  // compute inverse and project B -> A
+  // B -> A using inverse homography
   const Hinv = invert3x3(H);
   if (Hinv) {
-    const dstBinA = cornersB.map(([x,y]) => applyHomography(x,y,Hinv));
-    withImageTransform(imageTransforms[0], () => {
-      push();
-        noFill();
-        strokeWeight(3);
-        stroke(0); // black
-        beginShape();
-        for (let p of dstBinA) vertex(p[0], p[1]);
-        endShape(CLOSE);
-      pop();
-    });
+    tint(255, 127);
+    drawProjectedTexture(inputImageB, Hinv);
   } else {
-    // unable to invert homography; optionally draw nothing for B->A
-    console.warn('drawHomographyOutline: homography not invertible, skipping B->A outline');
+    console.warn('drawHomographyOutline: homography not invertible, skipping B->A textured projection');
   }
 }
 
@@ -509,8 +556,8 @@ function drawMatchesOverlay() {
       }
     }
 
-    let l0=imageToScreen(0, px1, py1);
-    let l1=imageToScreen(1, px2, py2);
+    let l0=applyTransform4x4(px1, py1, imageTransforms[0]);
+    let l1=applyTransform4x4(px2, py2, imageTransforms[1]);
     stroke(isInlier ? 'lime' : 'red');
     circle(l0[0], l0[1], 6);
     line(l0[0], l0[1], l1[0], l1[1]);
@@ -593,40 +640,36 @@ function cvMatToP5Image(mat, image) {
   tempCanvas.remove();
 }
 
-// Function to apply homography matrix
-function applyHomography(x, y, H) {
-  let newX = H[0][0] * x + H[0][1] * y + H[0][2];
-  let newY = H[1][0] * x + H[1][1] * y + H[1][2];
-  let newW = H[2][0] * x + H[2][1] * y + H[2][2]; // Homogeneous coordinate
+function applyTransform4x4(px, py, M) {
+  // strict: accept only flat row-major 4x4 arrays (length 16)
+  if (!Array.isArray(M) || M.length !== 16) return [px, py];
 
-  return [newX / newW, newY / newW]; // Normalize
+  const X = M[0] * px + M[1] * py + M[2] * 0 + M[3];
+  const Y = M[4] * px + M[5] * py + M[6] * 0 + M[7];
+  const W = M[12] * px + M[13] * py + M[14] * 0 + M[15];
+
+  if (!isFinite(W) || Math.abs(W) < 1e-12) return [X, Y];
+  return [X / W, Y / W];
 }
 
-function withImageTransform(H, callback) {
-  if (!H || !callback) return;
+// withImageTransform: accept index (0/1) or a 4x4 matrix directly.
+function withImageTransform(M, callback) {
+  if (!M || !callback) return;
 
-  // detect simple affine of form [[sx,0,tx],[0,sy,ty],[0,0,1]]
-  const isSimpleAffine = (H[0][1] === 0 && H[1][0] === 0 && H[2][0] === 0 && H[2][1] === 0 && H[2][2] === 1);
+  // check affine 3D (bottom row [0,0,0,1]) -> we can call p5's 3D applyMatrix
+  const isAffine3D = (M[3][0] === 0 && M[3][1] === 0 && M[3][2] === 0 && M[3][3] === 1);
   push();
-    if (isSimpleAffine) {
-      const sx = H[0][0], sy = H[1][1], tx = H[0][2], ty = H[1][2];
-      translate(tx, ty);
-      scale(sx, sy);
+    if (true || isAffine3D) {
+      // applyMatrix(a,b,c,d, e,f,g,h, i,j,k,l) row-major -> pass rows 0..2
+      applyMatrix(
+        M[0][0], M[0][1], M[0][2], M[0][3],
+        M[1][0], M[1][1], M[1][2], M[1][3],
+        M[2][0], M[2][1], M[2][2], M[2][3]
+      );
       callback();
     } else {
-      // General homography: cannot express with simple p5 transforms.
-      // Call callback so it can use imageToScreen/applyHomographyToPoint to draw in screen space.
+      // general projective 4x4: can't be set with applyMatrix; caller should use applyTransform4x4/applyTransform4x4
       callback();
     }
   pop();
-}
-
-function imageToScreen(index, px, py) {
-  const H = imageTransforms[index];
-  if (!H) return null;
-  // applyHomography is defined elsewhere and returns [x,y] in the same coordinate system as H
-  const [sx, sy] = applyHomography(px, py, H);
-  // draw() already sets the global top-left transform (translate(-width/2, -height/2)),
-  // so return values directly for drawing inside that transform.
-  return [sx, sy];
 }
