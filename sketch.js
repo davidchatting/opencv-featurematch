@@ -13,9 +13,26 @@ function setup() {
   // Use WEBGL so texture()/vertex(u,v) in drawImageWithHomography works
   canvas = createCanvas(1600, 800, WEBGL);
   canvas.drop(onFileDropped);
+
+  createForegroundSegmenter();
   
   // ensure texture UVs use normalized coordinates
   textureMode(NORMAL);
+}
+
+var selfieSegmentation = null;
+
+function createForegroundSegmenter() {
+  selfieSegmentation = new SelfieSegmentation({locateFile: (file) => {
+    return `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@latest/${file}`;
+  }});
+  var options = {
+      selfieMode: true,
+      modelSelection: 0,  //general
+      effect: 'mask',
+  };
+  
+  selfieSegmentation.setOptions(options);
 }
 
 function onFileDropped(file) {
@@ -23,9 +40,6 @@ function onFileDropped(file) {
   const div = upsertMedia(file.name);
 
   const img = createImg(file.data, '', () => {
-    console.log('Image loaded:', file.name);
-    console.log('Image dimensions:', img.width, 'x', img.height);
-
     img.parent(div);
     img.addClass('original');
 
@@ -41,15 +55,50 @@ function onFileDropped(file) {
       g.image(img, 0, 0, targetW, targetH);
       const lowResDataUrl = g.elt.toDataURL("image/jpeg", 1.0);
 
-      const lowResImg = createImg(lowResDataUrl, '', processImages);
+      const lowResImg = createImg(lowResDataUrl, '', () => {
+        attachMask(lowResImg.elt, div);
+        processImages();
+      });
       lowResImg.addClass('lowres');
       lowResImg.parent(div);
     }
     else {
       img.addClass('lowres');
+      attachMask(img.elt, div);
       processImages();
     }
   });
+}
+
+function attachMask(imgElement, div) {
+  selfieSegmentation.onResults(async (results) => {
+      const maskCanvas = document.createElement('canvas');
+      maskCanvas.width = results.segmentationMask.width;
+      maskCanvas.height = results.segmentationMask.height;
+      const ctx = maskCanvas.getContext('2d');
+      
+      // flip horizontally
+      ctx.translate(maskCanvas.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(results.segmentationMask, 0, 0);
+
+      // convert red-channel mask to greyscale (copy R to G and B)
+      const imageData = ctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+      const data = imageData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];     // red channel holds the mask value
+        data[i]     = r;       // R (keep)
+        data[i + 1] = r;       // G (copy from R)
+        data[i + 2] = r;       // B (copy from R)
+        //data[i + 3] = 255;     // A (fully opaque)
+      }
+      ctx.putImageData(imageData, 0, 0);
+
+      const maskImg = createImg(maskCanvas.toDataURL(), '');
+      maskImg.parent(div);
+      maskImg.addClass('mask');
+    });
+    selfieSegmentation.send({ image: imgElement });
 }
 
 function processImages() {
