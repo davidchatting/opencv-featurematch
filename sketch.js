@@ -20,10 +20,10 @@ function setup() {
   textureMode(NORMAL);
 }
 
-var selfieSegmentation = null;
+var maskSegmentation = null;
 
 function createForegroundSegmenter() {
-  selfieSegmentation = new SelfieSegmentation({locateFile: (file) => {
+  maskSegmentation = new SelfieSegmentation({locateFile: (file) => {
     return `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@latest/${file}`;
   }});
   var options = {
@@ -32,7 +32,7 @@ function createForegroundSegmenter() {
       effect: 'mask',
   };
   
-  selfieSegmentation.setOptions(options);
+  maskSegmentation.setOptions(options);
 }
 
 function onFileDropped(file) {
@@ -43,35 +43,64 @@ function onFileDropped(file) {
     img.parent(div);
     img.addClass('original');
 
-    const lowresMaxPixels = 640 * 480;
-    if (img.width * img.height > lowresMaxPixels) {
-      const s = Math.sqrt(lowresMaxPixels / (img.width * img.height));
-
-      const targetW = Math.round(img.width * s);
-      const targetH = Math.round(img.height * s);
-
-      console.log('lowResImg dimensions:', targetW, 'x', targetH);
-      const g = createGraphics(targetW, targetH);
-      g.image(img, 0, 0, targetW, targetH);
-      const lowResDataUrl = g.elt.toDataURL("image/jpeg", 1.0);
-
-      const lowResImg = createImg(lowResDataUrl, '', () => {
-        attachMask(lowResImg.elt, div);
-        processImages();
-      });
-      lowResImg.addClass('lowres');
+    const lowResImg = generateLowResImage(img.elt, () => {
       lowResImg.parent(div);
-    }
-    else {
-      img.addClass('lowres');
-      attachMask(img.elt, div);
-      processImages();
-    }
+      lowResImg.addClass('lowres');
+
+      const maskImg = generateMask(lowResImg.elt, () => {
+        maskImg.parent(div);
+        maskImg.addClass('mask');
+
+        const foregroundImg = applyMaskToImage(lowResImg, maskImg, false, () => {
+          foregroundImg.parent(div);
+          foregroundImg.addClass('foreground');
+
+          const backgroundImg = applyMaskToImage(lowResImg, maskImg, true, () => {
+            backgroundImg.parent(div);
+            backgroundImg.addClass('background');
+          });
+        });
+      });
+    });
   });
 }
 
-function attachMask(imgElement, div) {
-  selfieSegmentation.onResults(async (results) => {
+function generateLowResImage(imgElement, onloaded = () => {}) {
+  let lowresImg = null;
+
+  const lowresMaxPixels = 640 * 480;
+  if (imgElement.width * imgElement.height > lowresMaxPixels) { 
+    const s = Math.sqrt(lowresMaxPixels / (imgElement.width * imgElement.height));
+
+    const targetW = Math.round(imgElement.width * s);
+    const targetH = Math.round(imgElement.height * s);
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(imgElement, 0, 0, targetW, targetH);
+
+    const dataUrl = canvas.toDataURL("image/jpeg", 1.0);
+    
+    // clear canvas to free memory immediately
+    canvas.width = 0;
+    canvas.height = 0;
+
+    lowresImg = createImg(dataUrl, '', onloaded);
+  }
+  else {
+    lowresImg = new p5.Element(imgElement);
+    setTimeout(onloaded, 0);
+  }
+
+  return lowresImg;
+}
+
+function generateMask(imgElement, onloaded = () => {}) {
+  let maskImg = createImg('', '');
+
+  maskSegmentation.onResults(async (results) => {
       const maskCanvas = document.createElement('canvas');
       maskCanvas.width = results.segmentationMask.width;
       maskCanvas.height = results.segmentationMask.height;
@@ -94,11 +123,12 @@ function attachMask(imgElement, div) {
       }
       ctx.putImageData(imageData, 0, 0);
 
-      const maskImg = createImg(maskCanvas.toDataURL(), '');
-      maskImg.parent(div);
-      maskImg.addClass('mask');
+      maskImg.elt.onload = onloaded;
+      maskImg.elt.src = maskCanvas.toDataURL();
     });
-    selfieSegmentation.send({ image: imgElement });
+    maskSegmentation.send({ image: imgElement });
+
+    return(maskImg);
 }
 
 function processImages() {
@@ -178,14 +208,14 @@ function draw() {
     if(inputImageB) translate(-inputImageB.width / 2, -inputImageB.height / 2);
     if(inputImageA) {
       push();
-        tint(255, 127);
+        //tint(255, 127);
         drawProjectedImage(inputImageA, 0, 0,  imageTransforms[1]);
       pop();
     }
 
     if(inputImageB) {
       push();
-        tint(255, 127);
+        //tint(255, 127);
         drawProjectedImage(inputImageB, 0, 0, imageTransforms[0]);
       pop();
     }
@@ -217,4 +247,61 @@ function applyTransform4x4(px, py, M) {
 
   if (!isFinite(W) || Math.abs(W) < 1e-12) return [X, Y];
   return [X / W, Y / W];
+}
+
+/**
+ * Creates a new image element with the mask applied.
+ * Pixels where the mask is dark (black) become transparent.
+ * @param {HTMLImageElement|p5.Element} colorImg - the colour image
+ * @param {HTMLImageElement|p5.Element} maskImg - the greyscale mask (white = keep, black = transparent)
+ * @returns {p5.Element} - a new p5 img element containing the masked image
+ */
+function applyMaskToImage(colorImg, maskImg, invert = false, onloaded = () => {}) {
+  let resultImg = createImg('', '');
+
+  // accept p5.Element or raw DOM element
+  if (colorImg && colorImg.elt) colorImg = colorImg.elt;
+  if (maskImg && maskImg.elt) maskImg = maskImg.elt;
+
+  const w = colorImg.naturalWidth || colorImg.width;
+  const h = colorImg.naturalHeight || colorImg.height;
+
+  // create a canvas to composite the result
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+
+  // draw the colour image first
+  ctx.drawImage(colorImg, 0, 0, w, h);
+
+  // get colour image data
+  const colorData = ctx.getImageData(0, 0, w, h);
+  const cPixels = colorData.data;
+
+  // draw the mask (scaled to same size)
+  ctx.clearRect(0, 0, w, h);
+  ctx.drawImage(maskImg, 0, 0, w, h);
+  const maskData = ctx.getImageData(0, 0, w, h);
+  const mPixels = maskData.data;
+
+  // apply mask: use mask's red channel as alpha
+  for (let i = 0; i < cPixels.length; i += 4) {
+    // mask value (0 = transparent, 255 = opaque)
+    const maskVal = invert ? 255 - mPixels[i] : mPixels[i]; // red channel of mask
+
+    cPixels[i] = maskVal > 0 ? cPixels[i] : 0;
+    cPixels[i + 1] = maskVal > 0 ? cPixels[i + 1] : 0;
+    cPixels[i + 2] = maskVal > 0 ? cPixels[i + 2] : 0;
+    cPixels[i + 3] = maskVal;   // set alpha of colour pixel
+  }
+
+  // put the masked result back
+  ctx.putImageData(colorData, 0, 0);
+
+  // create a new p5 image element from the canvas
+  resultImg.elt.onload = onloaded;
+  resultImg.elt.src = canvas.toDataURL();
+
+  return resultImg;
 }
