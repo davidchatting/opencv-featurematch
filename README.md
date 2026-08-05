@@ -1,5 +1,9 @@
 # opencv-featurematch-js
 
+<!-- p5js-sync:screenshot -->
+![The example sketch: a reference image on the left, and on the right, the same object found and outlined in green within a cluttered scene](screenshot.png)
+<!-- /p5js-sync:screenshot -->
+
 *opencv-featurematch-js* is a JavaScript library for feature-based image alignment in the browser, built on [OpenCV.js](https://docs.opencv.org/4.x/d5/d10/tutorial_js_root.html). Given two images, it finds matching features, computes a homography between them, returning a transform used to warp one image onto the other.
 
 Useful anywhere two overlapping images need to be lined up automatically - panorama/mosaic stitching, burst-sequence or time-lapse alignment, augmented reality overlays, document/whiteboard scanning, object tracking, or motion tracking across frames.
