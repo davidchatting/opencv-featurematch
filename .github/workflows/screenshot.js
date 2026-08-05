@@ -9,7 +9,7 @@ const { chromium } = require('playwright');
 const path = require('path');
 
 const DEMO_URL = process.argv[2] || 'http://localhost:8099/';
-const OUT_PATH = path.join(__dirname, '..', 'screenshot.png');
+const OUT_PATH = path.join(__dirname, '..', '..', 'screenshot.png'); // repo root, two levels up from .github/workflows/
 
 (async () => {
   const browser = await chromium.launch({ args: ['--no-sandbox'] });
